@@ -36,7 +36,7 @@ pip install pygame numpy
 Uygulamayı başlatmak için terminalden şu komutu çalıştırın:
 
 ```bash
-python main.py
+python resim_show.py
 ```
 
 ### Arayüz Kontrolleri
@@ -48,7 +48,7 @@ python main.py
 
 ## ⚙️ Özelleştirme (Opsiyonel)
 
-`main.py` dosyasını bir metin editörüyle açarak simülasyon hızlarını sunumunuza göre ayarlayabilirsiniz:
+`resim_show.py` dosyasını bir metin editörüyle açarak simülasyon hızlarını sunumunuza göre ayarlayabilirsiniz:
 
 ```python
 # SİMÜLASYON AYARLARI
