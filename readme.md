@@ -64,4 +64,4 @@ GPU_PARALEL = 400    # GPU'nun aynı anda kaç piksel boyayacağını belirler
 2.  **GPU Modunda:** Resmin bir anda her yerden belirdiğini vurgulayın. "GPU'nun binlerce küçük eli vardır, hepsi aynı anda çalışır."
 
 ---
-*Hazırlayan: [Senin Adın]*
+*Hazırlayan: [Ahmet Gökhan Kocaman - Bahadır Bekeç]*
