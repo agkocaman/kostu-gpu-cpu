@@ -1,253 +1,222 @@
 import pygame
-import torch
-import numpy as np
-import time
+import random
 import sys
+import time
+import numpy as np
 
 # --- AYARLAR ---
-GENISLIK, YUKSEKLIK = 1000, 700  # Ekranı biraz büyüttük (Dashboard için yer)
-RESIM_ADI = "resim.jpg"         # Yanına güzel, yüksek çözünürlüklü bir resim koy
-GPU_SHOW_SURESI = 10.0          # GPU şovu kaç saniye sürsün?
+EKRAN_GEN = 1200
+EKRAN_YUK = 800
+RESIM_ADI = "resim.jpg"
 
-# Renkler
-RENK_ARKA = (30, 30, 35)
-RENK_BAR_BOS = (50, 50, 50)
-RENK_CPU_BAR = (255, 100, 100) # Kırmızı
-RENK_GPU_BAR = (100, 255, 100) # Yeşil
-RENK_YAZI = (220, 220, 220)
+# SİMÜLASYON AYARLARI
+CPU_ADIM = 30        # CPU görselleştirme hızı (Daha yüksek = Daha hızlı güncelleme)
+GPU_PARALEL = 400    # GPU'nun aynı anda attığı piksel sayısı
 
-# Pygame Başlatma
+# RENK PALETİ (Modern Dark Theme)
+RENK_BG = (30, 33, 40)          # Ana Arka Plan
+RENK_PANEL = (40, 44, 52)       # Panel Rengi
+RENK_BTN_CPU = (231, 76, 60)    # Alizarin Red
+RENK_BTN_GPU = (52, 152, 219)   # Peter River Blue
+RENK_BTN_HOVER = (255, 255, 255)# Buton üzerine gelince
+RENK_TEXT = (236, 240, 241)     # Clouds
+RENK_PIXEL_CPU = (46, 204, 113) # Emerald Green (İmleç)
+RENK_PIXEL_GPU = (0, 255, 255)  # Cyan (İmleç)
+
 pygame.init()
-ekran = pygame.display.set_mode((GENISLIK, YUKSEKLIK))
-pygame.display.set_caption("PROJE: CPU vs GPU Görüntü İşleme Benchmark")
+ekran = pygame.display.set_mode((EKRAN_GEN, EKRAN_YUK))
+pygame.display.set_caption("CPU vs GPU Mimari Simülasyonu v2.0")
 
 # Fontlar
-font_baslik = pygame.font.SysFont('Consolas', 32, bold=True)
-font_bilgi = pygame.font.SysFont('Consolas', 18)
-font_dev = pygame.font.SysFont('Arial', 60, bold=True)
+font_baslik = pygame.font.SysFont('Segoe UI', 40, bold=True)
+font_btn = pygame.font.SysFont('Segoe UI', 24, bold=True)
+font_bilgi = pygame.font.SysFont('Consolas', 16)
 
-# Resmi Yükle
-try:
-    ham_resim = pygame.image.load(RESIM_ADI)
-    # Resmi ekrana sığacak ama altta boşluk kalacak şekilde ayarla (Dashboard için)
-    resim_alani = (GENISLIK, YUKSEKLIK - 100) 
-    orijinal_resim = pygame.transform.scale(ham_resim, resim_alani)
-except FileNotFoundError:
-    print(f"HATA: '{RESIM_ADI}' dosyası bulunamadı!")
-    pygame.quit()
-    sys.exit()
+# --- RESİM İŞLEME ---
+def resim_yukle():
+    try:
+        ham = pygame.image.load(RESIM_ADI)
+        # Sunum için ideal boyut (çok büyük olursa simülasyon çok uzun sürer)
+        hedef_boyut = (600, 400)
+        resim = pygame.transform.scale(ham, hedef_boyut)
+        data = pygame.surfarray.array3d(resim)
+        return resim, data, hedef_boyut[0], hedef_boyut[1]
+    except:
+        # Resim yoksa otomatik desen oluştur
+        w, h = 600, 400
+        data = np.zeros((w, h, 3), dtype=int)
+        for x in range(w):
+            for y in range(h): data[x,y] = [(x*y)%255, (x+y)%255, y%255]
+        return None, data, w, h
 
-resim_array = pygame.surfarray.array3d(orijinal_resim) # (W, H, 3)
+_, pixel_data, w, h = resim_yukle()
+off_x = (EKRAN_GEN - w) // 2
+off_y = (EKRAN_YUK - h) // 2
 
-# --- YARDIMCI FONKSİYONLAR ---
+# --- ARAYÜZ ELEMANLARI ---
 
-def dashboard_ciz(mod, yuzde, fps=0, extra_text=""):
-    """Ekranın altına istatistik ve progress bar çizer"""
-    # Alt panel arka planı
-    pygame.draw.rect(ekran, (20, 20, 20), (0, YUKSEKLIK-100, GENISLIK, 100))
+def buton_ciz(rect, text, ana_renk, aktif_mi=False):
+    """Mouse üzerine gelince parlayan buton çizer"""
+    mouse_pos = pygame.mouse.get_pos()
+    is_hovered = rect.collidepoint(mouse_pos)
     
-    # Progress Bar Arka Plan
-    bar_rect = (50, YUKSEKLIK-40, GENISLIK-100, 20)
-    pygame.draw.rect(ekran, RENK_BAR_BOS, bar_rect)
+    renk = ana_renk
+    if is_hovered and aktif_mi:
+        renk = [min(c + 30, 255) for c in ana_renk] # Rengi aç
     
-    # Progress Bar Doluluk
-    doluluk = int((GENISLIK-100) * (yuzde / 100))
-    renk = RENK_GPU_BAR if "GPU" in mod else RENK_CPU_BAR
-    pygame.draw.rect(ekran, renk, (50, YUKSEKLIK-40, doluluk, 20))
-    
-    # Yazılar
-    yazi_mod = font_baslik.render(f"MOD: {mod}", True, renk)
-    yazi_fps = font_bilgi.render(f"PERFORMANS: {fps:.1f} FPS" if fps > 0 else "HESAPLANIYOR...", True, RENK_YAZI)
-    yazi_extra = font_bilgi.render(extra_text, True, (150, 150, 150))
-    
-    ekran.blit(yazi_mod, (50, YUKSEKLIK-85))
-    ekran.blit(yazi_fps, (350, YUKSEKLIK-80))
-    ekran.blit(yazi_extra, (GENISLIK-300, YUKSEKLIK-80))
-    
+    # Gölge
+    pygame.draw.rect(ekran, (20,20,20), (rect.x+4, rect.y+4, rect.w, rect.h), border_radius=12)
+    # Ana Buton
+    pygame.draw.rect(ekran, renk, rect, border_radius=12)
     # Çerçeve
-    pygame.draw.rect(ekran, (100,100,100), (0, YUKSEKLIK-100, GENISLIK, 100), 1)
+    pygame.draw.rect(ekran, (255,255,255) if is_hovered else (100,100,100), rect, 2, border_radius=12)
+    
+    txt_surf = font_btn.render(text, True, RENK_TEXT)
+    ekran.blit(txt_surf, (rect.centerx - txt_surf.get_width()//2, rect.centery - txt_surf.get_height()//2))
+    
+    return is_hovered and pygame.mouse.get_pressed()[0]
 
-def sepia_filtresi_cpu_show(img_array):
-    """CPU: Görsel şov için yavaşlatılmış ve görselleştirilmiş işlem"""
-    w, h, c = img_array.shape
-    yeni_resim = np.zeros_like(img_array)
+def geri_buton_kontrol():
+    """Simülasyon sırasında geri dönmek için buton"""
+    btn_rect = pygame.Rect(20, 20, 100, 40)
+    if buton_ciz(btn_rect, "< GERİ", (80, 80, 80), True):
+        return True
+    return False
+
+# --- SİMÜLASYONLAR ---
+
+def cpu_modu():
+    canvas = pygame.Surface((w, h))
+    canvas.fill((0,0,0))
+    running = True
+    count = 0
     
-    # Orijinal resmi önce bir gösterelim (grileşmiş gibi)
-    ekran.blit(pygame.surfarray.make_surface(img_array), (0,0))
-    pygame.display.flip()
+    # CPU için iterator (x, y)
+    iterator = ((x, y) for y in range(h) for x in range(w))
     
-    baslangic = time.time()
-    
-    # Tarama efekti için döngü
-    adim = 10 # Her seferde 10 sütun işle (Performans/Görsel denge)
-    
-    for x in range(0, w, adim):
-        # Olayları dinle (Pencere donmasın diye)
-        pygame.event.pump()
+    while running:
+        ekran.fill(RENK_BG)
+        # Başlık ve Çerçeve
+        title = font_baslik.render("CPU: SERIAL PROCESSING", True, RENK_BTN_CPU)
+        ekran.blit(title, (EKRAN_GEN//2 - title.get_width()//2, 50))
+        pygame.draw.rect(ekran, (50,50,50), (off_x-5, off_y-5, w+10, h+10), 2)
         
-        # Bu sütun bloğunu işle
-        limit_x = min(x + adim, w)
-        for i in range(x, limit_x):
-            for j in range(h):
-                r, g, b = img_array[i, j]
-                # Basit Sepia
-                tr = min(255, int(0.393*r + 0.769*g + 0.189*b))
-                tg = min(255, int(0.349*r + 0.686*g + 0.168*b))
-                tb = min(255, int(0.272*r + 0.534*g + 0.131*b))
-                yeni_resim[i, j] = [tr, tg, tb]
+        # Geri Butonu
+        if geri_buton_kontrol(): return
         
-        # Görselleştirme (Parça parça çiz)
-        if x % 20 == 0: # Çok sık çizip daha da yavaşlatmayalım
-            # İşlenmiş kısmı alıp ekrana basmak yerine, sadece o şeridi blit edebiliriz ama
-            # Pygame array handling biraz tricky, tüm resmi basmak daha güvenli:
-            surf = pygame.surfarray.make_surface(yeni_resim)
-            ekran.blit(surf, (0,0))
-            
-            # Tarama Çizgisi (Lazer gibi)
-            pygame.draw.line(ekran, (255, 50, 50), (x, 0), (x, YUKSEKLIK-100), 3)
-            
-            # Dashboard Güncelle
-            yuzde = (x / w) * 100
-            gecen_sure = time.time() - baslangic
-            dashboard_ciz("CPU (Single Core)", yuzde, 0, f"Süre: {gecen_sure:.1f}sn")
-            
-            pygame.display.flip()
-            
-            # CPU'yu sunumda göstermek için bilerek minicik bekletme (Opsiyonel)
-            # time.sleep(0.001) 
-
-    bitis = time.time()
-    return yeni_resim, bitis - baslangic
-
-def gpu_show_loop(tensor_img):
-    """GPU: Tek kare değil, sürekli akan bir video render simülasyonu"""
-    device = tensor_img.device
-    w, h, c = tensor_img.shape
-    
-    # Başlangıç zamanı
-    baslangic = time.time()
-    frame_count = 0
-    
-    # Sepia Temel Matrisi
-    base_matrix = torch.tensor([
-        [0.393, 0.769, 0.189],
-        [0.349, 0.686, 0.168],
-        [0.272, 0.534, 0.131]
-    ], device=device).t()
-
-    running_gpu = True
-    while running_gpu:
-        current_time = time.time()
-        gecen = current_time - baslangic
+        # Simülasyon Adımı
+        for _ in range(CPU_ADIM):
+            try:
+                x, y = next(iterator)
+                r, g, b = pixel_data[x, y]
+                canvas.set_at((x, y), (r, g, b))
+                
+                # Sadece son işlenen pikseli işaretle (Yeşil İmleç)
+                last_x, last_y = x, y
+            except StopIteration:
+                break
         
-        # Süre dolduysa çık
-        if gecen > GPU_SHOW_SURESI:
-            break
+        ekran.blit(canvas, (off_x, off_y))
+        
+        # CPU İmleci (Büyütülmüş)
+        if 'last_x' in locals():
+            pygame.draw.rect(ekran, RENK_PIXEL_CPU, (off_x + last_x, off_y + last_y, 4, 4))
             
-        # Olayları kontrol et (Çıkış için)
+        # İstatistik
+        txt_stat = font_bilgi.render("Tek Çekirdek: Pikseller sırayla işleniyor...", True, (150,150,150))
+        ekran.blit(txt_stat, (off_x, off_y + h + 20))
+
+        pygame.display.flip()
+        
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit(); sys.exit()
+            if event.type == pygame.QUIT: sys.exit()
 
-        # --- DİNAMİK EFEKT ---
-        # Matrisi zamanla hafifçe değiştirerek "Video Oynatıyor" hissi verelim
-        # Sinüs dalgası ile renk yoğunluğunu değiştiriyoruz
-        degisim = np.sin(gecen * 2) * 0.1 
-        matrix = base_matrix + degisim
+def gpu_modu():
+    canvas = pygame.Surface((w, h))
+    canvas.fill((0,0,0))
+    running = True
+    
+    # Koordinatları karıştır (Paralel erişim simülasyonu)
+    coords = [(x, y) for x in range(w) for y in range(h)]
+    random.shuffle(coords)
+    
+    idx = 0
+    total = len(coords)
+    
+    while running:
+        ekran.fill(RENK_BG)
+        title = font_baslik.render("GPU: PARALLEL PROCESSING", True, RENK_BTN_GPU)
+        ekran.blit(title, (EKRAN_GEN//2 - title.get_width()//2, 50))
+        pygame.draw.rect(ekran, (50,50,50), (off_x-5, off_y-5, w+10, h+10), 2)
+
+        if geri_buton_kontrol(): return
         
-        # GPU İŞLEMİ (Heavy Lifting)
-        img_float = tensor_img.float()
-        sonuc = torch.matmul(img_float, matrix)
-        sonuc = torch.clamp(sonuc, 0, 255).byte()
+        # Simülasyon Adımı (Toplu İşlem)
+        batch_coords = []
+        if idx < total:
+            end_idx = min(idx + GPU_PARALEL, total)
+            batch = coords[idx : end_idx]
+            
+            for bx, by in batch:
+                r, g, b = pixel_data[bx, by]
+                canvas.set_at((bx, by), (r, g, b))
+                batch_coords.append((bx, by))
+            
+            idx = end_idx
         
-        if device == "mps" or device == "cuda":
-            torch.mps.synchronize() if device == "mps" else torch.cuda.synchronize()
+        ekran.blit(canvas, (off_x, off_y))
         
-        # Ekrana Bas (GPU'dan CPU'ya veri çekmek darboğazdır ama şov için mecburuz)
-        sonuc_np = sonuc.cpu().numpy()
-        surf = pygame.surfarray.make_surface(sonuc_np)
-        ekran.blit(surf, (0,0))
+        # GPU İmleçleri (Mavi yağmur)
+        for bx, by in batch_coords:
+            ekran.set_at((off_x+bx, off_y+by), RENK_PIXEL_GPU)
+            # Parlama efekti
+            if random.random() > 0.8:
+                ekran.set_at((off_x+bx+1, off_y+by), (255,255,255))
         
-        frame_count += 1
-        fps = frame_count / (gecen + 0.0001)
-        kalan_sure = GPU_SHOW_SURESI - gecen
-        yuzde = (gecen / GPU_SHOW_SURESI) * 100
+        txt_stat = font_bilgi.render(f"Binlerce Çekirdek: Aynı anda {GPU_PARALEL} piksel işleniyor...", True, (150,150,150))
+        ekran.blit(txt_stat, (off_x, off_y + h + 20))
         
-        # Dashboard
-        dashboard_ciz("GPU (Parallel Stream)", yuzde, fps, f"Render: {frame_count} Frame")
+        pygame.display.flip()
+        
+        # GPU çok hızlı bitmesin diye minik gecikme (insan gözü görsün diye)
+        # time.sleep(0.002)
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT: sys.exit()
+
+# --- ANA MENÜ ---
+def main_menu():
+    btn_cpu_rect = pygame.Rect(EKRAN_GEN//2 - 250, EKRAN_YUK//2, 220, 80)
+    btn_gpu_rect = pygame.Rect(EKRAN_GEN//2 + 30, EKRAN_YUK//2, 220, 80)
+    
+    while True:
+        ekran.fill(RENK_BG)
+        
+        # Logo / Başlık
+        head = font_baslik.render("PIXEL RENDER BENCHMARK", True, RENK_TEXT)
+        sub = font_bilgi.render("Mimari Farklılıkları Eğitim Simülasyonu", True, (150,150,150))
+        ekran.blit(head, (EKRAN_GEN//2 - head.get_width()//2, 200))
+        ekran.blit(sub, (EKRAN_GEN//2 - sub.get_width()//2, 250))
+        
+        # Butonlar (Tıklama Kontrolü ile)
+        mouse_down = False
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT: sys.exit()
+            if event.type == pygame.MOUSEBUTTONDOWN: mouse_down = True
+        
+        # CPU Butonu Çiz ve Kontrol Et
+        if buton_ciz(btn_cpu_rect, "CPU BAŞLAT", RENK_BTN_CPU, True):
+            if mouse_down: cpu_modu()
+            
+        # GPU Butonu Çiz ve Kontrol Et
+        if buton_ciz(btn_gpu_rect, "GPU BAŞLAT", RENK_BTN_GPU, True):
+             if mouse_down: gpu_modu()
+        
+        # Alt Bilgi
+        info = font_bilgi.render("Mühendislik Sunumu İçin Hazırlanmıştır", True, (80,80,90))
+        ekran.blit(info, (EKRAN_GEN//2 - info.get_width()//2, EKRAN_YUK - 50))
+        
         pygame.display.flip()
 
-    return frame_count / GPU_SHOW_SURESI
-
-# --- ANA PROGRAM ---
-
-def ana_menu():
-    ekran.fill(RENK_ARKA)
-    
-    # Başlıklar
-    baslik = font_dev.render("BENCHMARK ARENA", True, (255, 255, 255))
-    ekran.blit(baslik, (GENISLIK//2 - baslik.get_width()//2, 100))
-    
-    # Menü Kutuları
-    btn_cpu = pygame.Rect(GENISLIK//2 - 250, 300, 200, 100)
-    btn_gpu = pygame.Rect(GENISLIK//2 + 50, 300, 200, 100)
-    
-    pygame.draw.rect(ekran, RENK_CPU_BAR, btn_cpu, border_radius=10)
-    pygame.draw.rect(ekran, RENK_GPU_BAR, btn_gpu, border_radius=10)
-    
-    yazi1 = font_baslik.render("[1] CPU", True, (0,0,0))
-    yazi2 = font_baslik.render("[2] GPU", True, (0,0,0))
-    
-    ekran.blit(yazi1, (btn_cpu.centerx - yazi1.get_width()//2, btn_cpu.centery - yazi1.get_height()//2))
-    ekran.blit(yazi2, (btn_gpu.centerx - yazi2.get_width()//2, btn_gpu.centery - yazi2.get_height()//2))
-    
-    info = font_bilgi.render("Başlamak için 1 veya 2'ye basın. Çıkış için ESC.", True, (150, 150, 150))
-    ekran.blit(info, (GENISLIK//2 - info.get_width()//2, 500))
-    
-    pygame.display.flip()
-
-running = True
-ana_menu()
-
-while running:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-            
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_1:
-                # CPU MODU BAŞLAT
-                ekran.fill((0,0,0))
-                # CPU işlemine giriyor...
-                _, sure = sepia_filtresi_cpu_show(resim_array)
-                
-                # Sonuç Ekranı
-                dashboard_ciz("CPU TAMAMLANDI", 100, 0, f"Toplam Süre: {sure:.2f} sn")
-                pygame.display.flip()
-                time.sleep(3) # Sonucu okumaları için bekle
-                ana_menu()
-                
-            elif event.key == pygame.K_2:
-                # GPU MODU BAŞLAT
-                ekran.fill((0,0,0))
-                load_msg = font_baslik.render("VRAM YÜKLENİYOR...", True, RENK_GPU_BAR)
-                ekran.blit(load_msg, (GENISLIK//2 - 150, YUKSEKLIK//2))
-                pygame.display.flip()
-                
-                # Tensor Hazırlığı
-                device = "mps" if torch.backends.mps.is_available() else "cpu"
-                tensor_img = torch.tensor(resim_array, device=device)
-                
-                # GPU Loop (Şovu uzatan kısım)
-                avg_fps = gpu_show_loop(tensor_img)
-                
-                # Sonuç
-                dashboard_ciz("GPU TAMAMLANDI", 100, avg_fps, "Test Bitti")
-                pygame.display.flip()
-                time.sleep(3)
-                ana_menu()
-            
-            elif event.key == pygame.K_ESCAPE:
-                running = False
-
-pygame.quit()
+if __name__ == "__main__":
+    main_menu()
